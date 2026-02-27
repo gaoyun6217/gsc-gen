@@ -12,6 +12,12 @@ import (
 	"github.com/gfrd/gen/types"
 )
 
+// GeneratedFile 已生成的文件信息
+type GeneratedFile struct {
+	Path string
+	Type string // backend/frontend/sql
+}
+
 // Config 生成器配置
 type Config struct {
 	Table        string   // 表名
@@ -453,4 +459,237 @@ func (g *Generator) generateFrontend(ctx context.Context, data *types.RenderData
 	}
 
 	return nil
+}
+
+// PrepareRenderData 准备渲染数据（导出函数）
+func PrepareRenderData(cfg *Config, table *types.TableInfo) *types.RenderData {
+	entityName := types.ToPascal(removePrefixForConfig(cfg, table.Name))
+
+	return &types.RenderData{
+		Table:        table,
+		Package:      cfg.Module,
+		Module:       cfg.Module,
+		EntityName:   entityName,
+		EntityKebab:  strings.ToLower(types.ToKebab(entityName)),
+		EntitySnake:  types.ToSnake(entityName),
+		Operations:   buildOperationsForConfig(cfg, table),
+		Features:     buildFeaturesForConfig(cfg.Features),
+		HasTree:      table.IsTreeTable,
+		HasSoftDelete: hasSoftDeleteInTable(table),
+		HasCreatedAt: hasCreatedAtInTable(table),
+		HasUpdatedAt: hasUpdatedAtInTable(table),
+	}
+}
+
+// GenerateBackendWithRenderData 使用渲染数据生成后端代码（导出函数）
+func GenerateBackendWithRenderData(renderer *engine.Renderer, output string, data *types.RenderData) ([]GeneratedFile, error) {
+	files := make([]GeneratedFile, 0)
+	ctx := context.Background()
+
+	basePath := output
+	modulePath := filepath.Join(basePath, "internal", "handler", data.Module)
+	apiPath := filepath.Join(basePath, "api", data.Module)
+	routerPath := filepath.Join(basePath, "internal", "router", "genrouter")
+	sqlPath := filepath.Join(basePath, "storage", "data", "generate")
+
+	// 创建目录
+	dirs := []string{modulePath, apiPath, routerPath, sqlPath}
+	for _, dir := range dirs {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return files, err
+		}
+	}
+
+	// 生成 API 文件
+	apiFile := filepath.Join(apiPath, data.EntitySnake+".go")
+	if err := renderer.RenderAndWrite(ctx, "backend/api.go.tpl", apiFile, data); err != nil {
+		return files, err
+	}
+	files = append(files, GeneratedFile{Path: apiFile, Type: "backend"})
+
+	// 生成 Handler 文件
+	handlerFile := filepath.Join(modulePath, data.EntitySnake+".go")
+	if err := renderer.RenderAndWrite(ctx, "backend/handler.go.tpl", handlerFile, data); err != nil {
+		return files, err
+	}
+	files = append(files, GeneratedFile{Path: handlerFile, Type: "backend"})
+
+	// 生成路由文件
+	routerFile := filepath.Join(routerPath, data.EntitySnake+".go")
+	if err := renderer.RenderAndWrite(ctx, "backend/router.go.tpl", routerFile, data); err != nil {
+		return files, err
+	}
+	files = append(files, GeneratedFile{Path: routerFile, Type: "backend"})
+
+	// 生成 SQL 菜单文件
+	sqlFile := filepath.Join(sqlPath, data.EntitySnake+"_menu.sql")
+	if err := renderer.RenderAndWrite(ctx, "sql/menu.sql.tpl", sqlFile, data); err != nil {
+		return files, err
+	}
+	files = append(files, GeneratedFile{Path: sqlFile, Type: "sql"})
+
+	return files, nil
+}
+
+// GenerateFrontendWithRenderData 使用渲染数据生成前端代码（导出函数）
+func GenerateFrontendWithRenderData(renderer *engine.Renderer, webOutput string, data *types.RenderData) ([]GeneratedFile, error) {
+	files := make([]GeneratedFile, 0)
+	ctx := context.Background()
+
+	basePath := webOutput
+	apiPath := filepath.Join(basePath, "api", data.Module, data.EntityKebab)
+	viewPath := filepath.Join(basePath, "views", data.Module, data.EntityKebab)
+
+	// 创建目录
+	if err := os.MkdirAll(apiPath, 0755); err != nil {
+		return files, err
+	}
+	if err := os.MkdirAll(viewPath, 0755); err != nil {
+		return files, err
+	}
+
+	// 生成 API 文件
+	apiFile := filepath.Join(apiPath, "index.ts")
+	if err := renderer.RenderAndWrite(ctx, "frontend/api.ts.tpl", apiFile, data); err != nil {
+		return files, err
+	}
+	files = append(files, GeneratedFile{Path: apiFile, Type: "frontend"})
+
+	// 生成 TypeScript 类型文件
+	typesFile := filepath.Join(apiPath, "types.ts")
+	if err := renderer.RenderAndWrite(ctx, "frontend/types.ts.tpl", typesFile, data); err != nil {
+		return files, err
+	}
+	files = append(files, GeneratedFile{Path: typesFile, Type: "frontend"})
+
+	// 生成列表页
+	indexFile := filepath.Join(viewPath, "index.vue")
+	if err := renderer.RenderAndWrite(ctx, "frontend/index.vue.tpl", indexFile, data); err != nil {
+		return files, err
+	}
+	files = append(files, GeneratedFile{Path: indexFile, Type: "frontend"})
+
+	// 生成编辑弹窗
+	editFile := filepath.Join(viewPath, "edit.vue")
+	if err := renderer.RenderAndWrite(ctx, "frontend/edit.vue.tpl", editFile, data); err != nil {
+		return files, err
+	}
+	files = append(files, GeneratedFile{Path: editFile, Type: "frontend"})
+
+	return files, nil
+}
+
+// 辅助函数（包内使用）
+func removePrefixForConfig(cfg *Config, tableName string) string {
+	prefixes := []string{"sys_", "admin_", "hg_", "t_", "tb_"}
+	for _, prefix := range prefixes {
+		if strings.HasPrefix(tableName, prefix) {
+			return strings.TrimPrefix(tableName, prefix)
+		}
+	}
+	return tableName
+}
+
+func buildOperationsForConfig(cfg *Config, table *types.TableInfo) []*types.OperationInfo {
+	var ops []*types.OperationInfo
+	features := buildFeaturesForConfig(cfg.Features)
+
+	module := cfg.Module
+	entityName := removePrefixForConfig(cfg, table.Name)
+	entityKebab := types.ToKebab(types.ToPascal(entityName))
+
+	if features["list"] {
+		ops = append(ops, &types.OperationInfo{
+			Name:    "List",
+			Comment: "获取" + table.Comment + "列表",
+			Path:    "/" + module + "/" + entityKebab + "/list",
+			Method:  "get",
+			Tags:    module,
+			Summary: "获取" + table.Comment + "列表",
+		})
+	}
+
+	if features["add"] {
+		ops = append(ops, &types.OperationInfo{
+			Name:    "Add",
+			Comment: "添加" + table.Comment,
+			Path:    "/" + module + "/" + entityKebab + "/add",
+			Method:  "post",
+			Tags:    module,
+			Summary: "添加" + table.Comment,
+		})
+	}
+
+	if features["edit"] {
+		ops = append(ops, &types.OperationInfo{
+			Name:    "Edit",
+			Comment: "修改" + table.Comment,
+			Path:    "/" + module + "/" + entityKebab + "/edit",
+			Method:  "post",
+			Tags:    module,
+			Summary: "修改" + table.Comment,
+		})
+	}
+
+	if features["delete"] {
+		ops = append(ops, &types.OperationInfo{
+			Name:    "Delete",
+			Comment: "删除" + table.Comment,
+			Path:    "/" + module + "/" + entityKebab + "/delete",
+			Method:  "post",
+			Tags:    module,
+			Summary: "删除" + table.Comment,
+		})
+	}
+
+	if features["view"] {
+		ops = append(ops, &types.OperationInfo{
+			Name:    "View",
+			Comment: "查看" + table.Comment + "详情",
+			Path:    "/" + module + "/" + entityKebab + "/view",
+			Method:  "get",
+			Tags:    module,
+			Summary: "查看" + table.Comment + "详情",
+		})
+	}
+
+	return ops
+}
+
+func buildFeaturesForConfig(features []string) map[string]bool {
+	featureMap := make(map[string]bool)
+	for _, f := range features {
+		featureMap[strings.TrimSpace(f)] = true
+	}
+	if len(featureMap) == 0 {
+		featureMap["list"] = true
+	}
+	return featureMap
+}
+
+func hasSoftDeleteInTable(table *types.TableInfo) bool {
+	for _, col := range table.Columns {
+		if col.Name == "deleted_at" {
+			return true
+		}
+	}
+	return false
+}
+
+func hasCreatedAtInTable(table *types.TableInfo) bool {
+	for _, col := range table.Columns {
+		if col.Name == "created_at" {
+			return true
+		}
+	}
+	return false
+}
+
+func hasUpdatedAtInTable(table *types.TableInfo) bool {
+	for _, col := range table.Columns {
+		if col.Name == "updated_at" {
+			return true
+		}
+	}
+	return false
 }

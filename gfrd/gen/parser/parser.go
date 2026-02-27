@@ -527,3 +527,54 @@ func (p *Parser) isTreeTable(columns []*types.ColumnInfo) bool {
 
 	return hasParentID && (hasLevel || hasPath)
 }
+
+// ListTables 列出所有表
+func (p *Parser) ListTables() ([]*types.TableInfo, error) {
+	var query string
+	switch p.driver {
+	case "mysql":
+		query = `
+			SELECT TABLE_NAME, TABLE_COMMENT
+			FROM information_schema.TABLES
+			WHERE TABLE_SCHEMA = DATABASE()
+			ORDER BY TABLE_NAME`
+	case "postgres":
+		query = `
+			SELECT c.relname AS table_name, obj_description(c.oid, 'pg_class') AS table_comment
+			FROM pg_class c
+			JOIN pg_namespace n ON n.oid = c.relnamespace
+			WHERE c.relkind = 'r' AND n.nspname = 'public'
+			ORDER BY c.relname`
+	default:
+		query = `
+			SELECT TABLE_NAME, TABLE_COMMENT
+			FROM information_schema.TABLES
+			WHERE TABLE_SCHEMA = DATABASE()
+			ORDER BY TABLE_NAME`
+	}
+
+	rows, err := p.db.Query(query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query tables: %w", err)
+	}
+	defer rows.Close()
+
+	var tables []*types.TableInfo
+	for rows.Next() {
+		var (
+			tableName   string
+			tableComment sql.NullString
+		)
+
+		if err := rows.Scan(&tableName, &tableComment); err != nil {
+			return nil, fmt.Errorf("failed to scan table: %w", err)
+		}
+
+		tables = append(tables, &types.TableInfo{
+			Name:    tableName,
+			Comment: tableComment.String,
+		})
+	}
+
+	return tables, nil
+}
