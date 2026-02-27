@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__web-search-prime__webSearchPrime",
+      "mcp__web-reader__webReader",
+      "mcp__zread__search_doc",
+      "mcp__zread__read_file",
+      "mcp__zread__get_repo_structure",
+      "Bash(go build:*)",
+      "Bash(go mod:*)",
+      "Bash(./bin/gfrd-gen.exe:*)",
+      "Bash(dir:*)",
+      "Bash(go run:*)",
+      "Bash(rm:*)",
+      "Bash(go:*)",
+      "Bash(cmd.exe:*)",
+      "Bash(git add:*)",
+      "Bash(git:*)"
+    ]
+  }
+}

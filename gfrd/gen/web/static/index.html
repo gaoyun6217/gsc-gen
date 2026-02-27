@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GFRD 代码生成器</title>
+  <link rel="stylesheet" href="https://unpkg.com/element-plus/dist/index.css">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f7fa; }
+    .app { display: flex; min-height: 100vh; }
+    .sidebar { width: 220px; background: #304156; color: #fff; }
+    .sidebar-header { padding: 20px; text-align: center; border-bottom: 1px solid #3d506a; }
+    .sidebar-header h1 { font-size: 18px; font-weight: 500; }
+    .nav-menu { list-style: none; padding: 10px 0; }
+    .nav-menu li { padding: 12px 20px; cursor: pointer; transition: background 0.3s; }
+    .nav-menu li:hover { background: #3d506a; }
+    .nav-menu li.active { background: #409EFF; }
+    .main-content { flex: 1; padding: 20px; overflow-y: auto; }
+    .page { display: none; }
+    .page.active { display: block; }
+    .card { background: #fff; border-radius: 4px; padding: 20px; margin-bottom: 20px; box-shadow: 0 2px 12px rgba(0,0,0,0.1); }
+    .card-title { font-size: 16px; font-weight: 600; margin-bottom: 15px; color: #303133; }
+    .form-row { display: flex; gap: 20px; margin-bottom: 15px; }
+    .form-item { flex: 1; }
+    .form-item label { display: block; margin-bottom: 8px; color: #606266; font-size: 14px; }
+    .table-container { max-height: 500px; overflow-y: auto; }
+    .btn-group { margin-top: 20px; display: flex; gap: 10px; }
+    .code-preview { background: #f8f8f8; border: 1px solid #e4e7ed; border-radius: 4px; padding: 15px; font-family: 'Consolas', 'Monaco', monospace; font-size: 13px; white-space: pre-wrap; word-break: break-all; max-height: 400px; overflow-y: auto; }
+    .status-badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; }
+    .status-success { background: #f0f9eb; color: #67c23a; }
+    .status-info { background: #ecf5ff; color: #409EFF; }
+  </style>
+</head>
+<body>
+  <div id="app" class="app">
+    <!-- 侧边栏 -->
+    <div class="sidebar">
+      <div class="sidebar-header">
+        <h1>GFRD 代码生成器</h1>
+      </div>
+      <ul class="nav-menu">
+        <li :class="{ active: currentPage === 'db' }" @click="currentPage = 'db'">数据库配置</li>
+        <li :class="{ active: currentPage === 'table' }" @click="currentPage = 'table'">选择表</li>
+        <li :class="{ active: currentPage === 'config' }" @click="currentPage = 'config'">字段配置</li>
+        <li :class="{ active: currentPage === 'generate' }" @click="currentPage = 'generate'">代码生成</li>
+        <li :class="{ active: currentPage === 'history' }" @click="currentPage = 'history'">生成历史</li>
+      </ul>
+    </div>
+
+    <!-- 主内容区 -->
+    <div class="main-content">
+      <!-- 数据库配置页面 -->
+      <div class="page" :class="{ active: currentPage === 'db' }">
+        <div class="card">
+          <div class="card-title">数据库连接</div>
+          <div class="form-row">
+            <div class="form-item">
+              <label>数据库类型</label>
+              <el-select v-model="dbConfig.type" style="width: 100%">
+                <el-option label="MySQL" value="mysql"></el-option>
+                <el-option label="PostgreSQL" value="postgres"></el-option>
+              </el-select>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-item">
+              <label>连接字符串 (DSN)</label>
+              <el-input v-model="dbConfig.dsn" placeholder="mysql:root:123456@tcp(127.0.0.1:3306)/gfrd"></el-input>
+            </div>
+          </div>
+          <div class="btn-group">
+            <el-button type="primary" @click="testConnection">测试连接</el-button>
+            <el-button @click="loadTables" v-if="connected">加载表列表</el-button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 选择表页面 -->
+      <div class="page" :class="{ active: currentPage === 'table' }">
+        <div class="card">
+          <div class="card-title">选择要生成代码的表</div>
+          <div class="table-container">
+            <el-table :data="tables" @selection-change="handleTableSelection" height="400">
+              <el-table-column type="selection" width="55"></el-table-column>
+              <el-table-column prop="name" label="表名" width="200"></el-table-column>
+              <el-table-column prop="comment" label="注释"></el-table-column>
+            </el-table>
+          </div>
+          <div class="btn-group">
+            <el-button @click="selectAll">全选</el-button>
+            <el-button type="primary" @click="goToConfig" :disabled="selectedTables.length === 0">
+              下一步：字段配置
+            </el-button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 字段配置页面 -->
+      <div class="page" :class="{ active: currentPage === 'config' }">
+        <div class="card">
+          <div class="card-title">字段配置 - {{ currentTable }}</div>
+          <el-table :data="tableColumns" height="500">
+            <el-table-column prop="name" label="字段名" width="150"></el-table-column>
+            <el-table-column prop="type" label="类型" width="120"></el-table-column>
+            <el-table-column prop="comment" label="注释"></el-table-column>
+            <el-table-column label="列表显示" width="100">
+              <template #default="scope">
+                <el-checkbox v-model="scope.row.isListField"></el-checkbox>
+              </template>
+            </el-table-column>
+            <el-table-column label="查询条件" width="100">
+              <template #default="scope">
+                <el-checkbox v-model="scope.row.isQueryField"></el-checkbox>
+              </template>
+            </el-table-column>
+            <el-table-column label="表单类型" width="120">
+              <template #default="scope">
+                <el-select v-model="scope.row.formType" size="small">
+                  <el-option label="输入框" value="input"></el-option>
+                  <el-option label="文本域" value="textarea"></el-option>
+                  <el-option label="下拉框" value="select"></el-option>
+                  <el-option label="单选框" value="radio"></el-option>
+                  <el-option label="复选框" value="checkbox"></el-option>
+                  <el-option label="开关" value="switch"></el-option>
+                  <el-option label="日期" value="date"></el-option>
+                  <el-option label="日期时间" value="datetime"></el-option>
+                </el-select>
+              </template>
+            </el-table-column>
+          </el-table>
+          <div class="btn-group">
+            <el-button @click="currentPage = 'table'">上一步</el-button>
+            <el-button type="primary" @click="saveFieldConfig">保存配置</el-button>
+            <el-button type="primary" @click="goToGenerate">下一步：生成代码</el-button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 代码生成页面 -->
+      <div class="page" :class="{ active: currentPage === 'generate' }">
+        <div class="card">
+          <div class="card-title">生成配置</div>
+          <div class="form-row">
+            <div class="form-item">
+              <label>模块名</label>
+              <el-input v-model="genConfig.module" placeholder="sys"></el-input>
+            </div>
+            <div class="form-item">
+              <label>后端输出目录</label>
+              <el-input v-model="genConfig.output" placeholder="./server"></el-input>
+            </div>
+            <div class="form-item">
+              <label>前端输出目录</label>
+              <el-input v-model="genConfig.web" placeholder="./web"></el-input>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-item">
+              <label>功能选择</label>
+              <el-checkbox-group v-model="genConfig.features">
+                <el-checkbox label="list">列表查询</el-checkbox>
+                <el-checkbox label="add">新增</el-checkbox>
+                <el-checkbox label="edit">修改</el-checkbox>
+                <el-checkbox label="delete">删除</el-checkbox>
+                <el-checkbox label="view">详情</el-checkbox>
+              </el-checkbox-group>
+            </div>
+          </div>
+          <div class="btn-group">
+            <el-button @click="currentPage = 'config'">上一步</el-button>
+            <el-button type="primary" @click="generateCode" :loading="generating">生成代码</el-button>
+          </div>
+        </div>
+
+        <!-- 生成结果 -->
+        <div class="card" v-if="generateResult">
+          <div class="card-title">生成结果</div>
+          <el-alert type="success" :title="generateResult.message" show-icon></el-alert>
+        </div>
+      </div>
+
+      <!-- 生成历史页面 -->
+      <div class="page" :class="{ active: currentPage === 'history' }">
+        <div class="card">
+          <div class="card-title">生成历史</div>
+          <el-table :data="historyRecords" height="400">
+            <el-table-column prop="table" label="表名" width="150"></el-table-column>
+            <el-table-column prop="module" label="模块" width="80"></el-table-column>
+            <el-table-column prop="tableComment" label="注释"></el-table-column>
+            <el-table-column prop="fieldCount" label="字段数" width="80"></el-table-column>
+            <el-table-column prop="fileCount" label="文件数" width="80"></el-table-column>
+            <el-table-column prop="generatedAt" label="生成时间" width="180"></el-table-column>
+            <el-table-column label="操作" width="200">
+              <template #default="scope">
+                <el-button size="small" @click="viewHistoryDetail(scope.row)">查看</el-button>
+                <el-button size="small" type="warning" @click="rollback(scope.row)">回滚</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+  <script src="https://unpkg.com/element-plus"></script>
+  <script src="https://unpkg.com/axios/dist/axios.min.js"></script>
+  <script>
+    const { createApp, ref, reactive, computed } = Vue;
+
+    createApp({
+      setup() {
+        const currentPage = ref('db');
+        const connected = ref(false);
+        const generating = ref(false);
+        const generateResult = ref(null);
+
+        const dbConfig = reactive({
+          type: 'mysql',
+          dsn: 'mysql:root:123456@tcp(127.0.0.1:3306)/gfrd'
+        });
+
+        const genConfig = reactive({
+          module: 'sys',
+          output: './server',
+          web: './web',
+          features: ['list', 'add', 'edit', 'delete', 'view']
+        });
+
+        const tables = ref([]);
+        const selectedTables = ref([]);
+        const tableColumns = ref([]);
+        const currentTable = ref('');
+        const fieldConfigs = reactive({});
+        const historyRecords = ref([]);
+
+        const API_BASE = '/api';
+
+        // 测试数据库连接
+        const testConnection = async () => {
+          try {
+            const res = await axios.post(`${API_BASE}/db/test`, {
+              dsn: dbConfig.dsn,
+              type: dbConfig.type
+            });
+            if (res.data.success) {
+              ElementPlus.ElMessage.success('连接成功');
+              connected.value = true;
+            } else {
+              ElementPlus.ElMessage.error(res.data.message);
+            }
+          } catch (err) {
+            ElementPlus.ElMessage.error('连接失败：' + err.message);
+          }
+        };
+
+        // 加载表列表
+        const loadTables = async () => {
+          try {
+            const res = await axios.post(`${API_BASE}/db/tables`, {
+              dsn: dbConfig.dsn,
+              type: dbConfig.type
+            });
+            if (res.data.success) {
+              tables.value = res.data.data;
+              currentPage.value = 'table';
+              ElementPlus.ElMessage.success('加载成功');
+            }
+          } catch (err) {
+            ElementPlus.ElMessage.error('加载失败');
+          }
+        };
+
+        // 选择表
+        const handleTableSelection = (selection) => {
+          selectedTables.value = selection.map(row => row.name);
+        };
+
+        // 全选
+        const selectAll = () => {
+          selectedTables.value = tables.value.map(t => t.name);
+        };
+
+        // 进入字段配置
+        const goToConfig = async () => {
+          if (selectedTables.value.length === 0) return;
+          currentTable.value = selectedTables.value[0];
+
+          try {
+            const res = await axios.post(`${API_BASE}/db/table/detail`, {
+              dsn: dbConfig.dsn,
+              type: dbConfig.type,
+              table: currentTable.value
+            });
+            if (res.data.success) {
+              tableColumns.value = res.data.data.columns;
+              currentPage.value = 'config';
+            }
+          } catch (err) {
+            ElementPlus.ElMessage.error('加载表详情失败');
+          }
+        };
+
+        // 保存字段配置
+        const saveFieldConfig = () => {
+          fieldConfigs[currentTable.value] = tableColumns.value;
+          ElementPlus.ElMessage.success('配置已保存');
+        };
+
+        // 进入生成页面
+        const goToGenerate = () => {
+          currentPage.value = 'generate';
+        };
+
+        // 生成代码
+        const generateCode = async () => {
+          generating.value = true;
+          try {
+            const res = await axios.post(`${API_BASE}/generate`, {
+              dsn: dbConfig.dsn,
+              type: dbConfig.type,
+              tables: selectedTables.value,
+              module: genConfig.module,
+              output: genConfig.output,
+              web: genConfig.web,
+              features: genConfig.features
+            });
+            if (res.data.success) {
+              generateResult.value = res.data;
+              ElementPlus.ElMessage.success('生成成功');
+              loadHistory();
+            } else {
+              ElementPlus.ElMessage.error(res.data.message);
+            }
+          } catch (err) {
+            ElementPlus.ElMessage.error('生成失败');
+          } finally {
+            generating.value = false;
+          }
+        };
+
+        // 加载历史记录
+        const loadHistory = async () => {
+          try {
+            const res = await axios.get(`${API_BASE}/history`);
+            if (res.data.success) {
+              historyRecords.value = res.data.data;
+            }
+          } catch (err) {
+            console.error('加载历史失败', err);
+          }
+        };
+
+        // 查看历史详情
+        const viewHistoryDetail = (record) => {
+          ElementPlus.ElMessage.info('查看历史详情功能开发中');
+        };
+
+        // 回滚
+        const rollback = async (record) => {
+          try {
+            const res = await axios.post(`${API_BASE}/history/rollback`, {
+              recordId: record.id
+            });
+            if (res.data.success) {
+              ElementPlus.ElMessage.success('回滚成功');
+              loadHistory();
+            } else {
+              ElementPlus.ElMessage.error(res.data.message);
+            }
+          } catch (err) {
+            ElementPlus.ElMessage.error('回滚失败');
+          }
+        };
+
+        // 初始化加载历史
+        loadHistory();
+
+        return {
+          currentPage,
+          connected,
+          generating,
+          generateResult,
+          dbConfig,
+          genConfig,
+          tables,
+          selectedTables,
+          tableColumns,
+          currentTable,
+          historyRecords,
+          testConnection,
+          loadTables,
+          handleTableSelection,
+          selectAll,
+          goToConfig,
+          saveFieldConfig,
+          goToGenerate,
+          generateCode,
+          viewHistoryDetail,
+          rollback
+        };
+      }
+    }).use(ElementPlus).mount('#app');
+  </script>
+</body>
+</html>
