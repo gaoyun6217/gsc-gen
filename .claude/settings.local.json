@@ -15,7 +15,8 @@
       "Bash(go:*)",
       "Bash(cmd.exe:*)",
       "Bash(git add:*)",
-      "Bash(git:*)"
+      "Bash(git:*)",
+      "Bash(curl:*)"
     ]
   }
 }
