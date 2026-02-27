@@ -1,0 +1,24 @@
+# Server Configuration
+
+server:
+  address: ":8000"
+  openapiPath: "/api.json"
+  swaggerPath: "/swagger"
+
+# Database Configuration
+database:
+  default:
+    link: "mysql:root:123456@tcp(127.0.0.1:3306)/gfrd?parseTime=true&loc=Local"
+    debug: true
+
+# Redis Configuration
+redis:
+  default:
+    address: "127.0.0.1:6379"
+    db: 0
+
+# Logger Configuration
+logger:
+  path: "./storage/logs"
+  level: "all"
+  rotate: "daily"

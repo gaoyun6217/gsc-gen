@@ -1,0 +1,35 @@
+# Generator Configuration File
+# 代码生成器配置文件
+
+database:
+  driver: mysql
+  dsn: "root:123456@tcp(127.0.0.1:3306)/gfrd?parseTime=true&loc=Local"
+
+generator:
+  # 后端配置
+  backend:
+    enabled: true
+    output: "./server"
+    package: "github.com/gfrd/server"
+    layerMode: "simple"  # simple: 仅 Handler, standard: Handler + Service
+    withTest: true       # 是否生成单元测试
+    withDoc: true        # 是否生成 API 文档注释
+
+  # 前端配置
+  frontend:
+    enabled: true
+    output: "./web/src"
+    apiOutput: "api"
+    viewOutput: "views"
+    typescript: true
+
+  # 功能开关
+  features:
+    list: true         # 列表查询
+    add: true          # 新增
+    edit: true         # 修改
+    delete: true       # 删除
+    view: true         # 详情
+    export: false      # 导出
+    import: false      # 导入
+    batchDelete: true  # 批量删除
